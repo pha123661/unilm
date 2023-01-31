@@ -4,3 +4,4 @@ weights
 arrow
 logs
 log
+**.env**
