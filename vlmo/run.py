@@ -163,20 +163,20 @@ def main(_config):
         for name, param in model.named_parameters():
             rank_zero_info("{}\t{}".format(name, param.requires_grad))
 
-        # Delta tuning
-    # if _config['delta'] is not None:
-    #     # from bigmodelvis import Visualization
-    #     # Visualization(model).structure_graph()
-    #     rank_zero_info("#" * 20)
-    #     rank_zero_info(f"Enabling delta-tuning {_config['delta']}")
-    #     rank_zero_info("#" * 20)
-    #     if _config['delta'] == 'bitfit':
-    #         for name, param in model.named_parameters():
-    #             if name[-len('bias'):] != "bias":
-    #                 param.requires_grad = False
-    #     else:
-    #         raise Exception(
-    #             f'no matching delta-tuning implementation for {_config["delta"]}')
+    # Delta tuning
+    if _config['delta'] is not None:
+        # from bigmodelvis import Visualization
+        # Visualization(model).structure_graph()
+        if _config['delta'] == 'bitfit':
+            for name, param in model.named_parameters():
+                if name[-len('bias'):] != "bias":
+                    param.requires_grad = False
+        else:
+            raise Exception(
+                f'no matching delta-tuning implementation for {_config["delta"]}')
+        rank_zero_info("#" * 20)
+        rank_zero_info(f"Enabled delta-tuning {_config['delta']}")
+        rank_zero_info("#" * 20)
 
     if not _config["test_only"]:
         trainer.fit(model, datamodule=dm)
