@@ -22,12 +22,9 @@ from functools import partial
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
-from functools import partial
-
+from pytorch_lightning.utilities.distributed import rank_zero_info
 from timm.models.layers import DropPath, to_2tuple, trunc_normal_
 from timm.models.registry import register_model
-from pytorch_lightning.utilities.distributed import rank_zero_info
 
 
 class Mlp(nn.Module):
@@ -79,18 +76,18 @@ class Attention(nn.Module):
         else:
             self.q_bias = None
             self.v_bias = None
-        
+
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = nn.Linear(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
-
 
     def forward(self, x, mask=None, relative_position_bias=None):
         B, N, C = x.shape
 
         qkv_bias = None
         if self.q_bias is not None:
-            qkv_bias = torch.cat((self.q_bias, torch.zeros_like(self.v_bias, requires_grad=False), self.v_bias))
+            qkv_bias = torch.cat((self.q_bias, torch.zeros_like(
+                self.v_bias, requires_grad=False), self.v_bias))
         qkv = F.linear(input=x, weight=self.qkv.weight, bias=qkv_bias)
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
 
@@ -102,7 +99,7 @@ class Attention(nn.Module):
 
         q = q * self.scale
         attn = (q.float() @ k.float().transpose(-2, -1))
-        
+
         if relative_position_bias is not None:
             attn = attn + relative_position_bias.unsqueeze(0)
 
@@ -146,7 +143,8 @@ class Block(nn.Module):
             proj_drop=drop,
         )
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
-        self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
+        self.drop_path = DropPath(
+            drop_path) if drop_path > 0.0 else nn.Identity()
         self.norm2_text = norm_layer(dim)
         self.norm2_imag = norm_layer(dim)
         mlp_hidden_dim = int(dim * mlp_ratio)
@@ -171,32 +169,40 @@ class Block(nn.Module):
                 drop=drop,
             )
             self.norm2_vl = norm_layer(dim)
-        
+
         self.gamma_1 = \
-            nn.Parameter(layer_scale_init_values * torch.ones((dim)),requires_grad=True) \
+            nn.Parameter(layer_scale_init_values * torch.ones((dim)), requires_grad=True) \
             if layer_scale_init_values is not None else 1.0
         self.gamma_2 = \
-            nn.Parameter(layer_scale_init_values * torch.ones((dim)),requires_grad=True) \
+            nn.Parameter(layer_scale_init_values * torch.ones((dim)), requires_grad=True) \
             if layer_scale_init_values is not None else 1.0
 
         self.max_text_len = max_text_len
 
     def forward(self, x, mask=None, modality_type=None, relative_position_bias=None):
-        x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), mask=mask, relative_position_bias=relative_position_bias))
+        x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x),
+                               mask=mask, relative_position_bias=relative_position_bias))
 
         if modality_type == "image":
-            x = x + self.drop_path(self.gamma_2 * self.mlp_imag(self.norm2_imag(x)))
+            x = x + self.drop_path(self.gamma_2 *
+                                   self.mlp_imag(self.norm2_imag(x)))
         elif modality_type == "text":
-            x = x + self.drop_path(self.gamma_2 * self.mlp_text(self.norm2_text(x)))
+            x = x + self.drop_path(self.gamma_2 *
+                                   self.mlp_text(self.norm2_text(x)))
         else:
             if self.mlp_vl is None:
                 x_text = x[:, : self.max_text_len]
-                x_imag = x[:, self.max_text_len :]
-                x_text = x_text + self.drop_path(self.gamma_2 * self.mlp_text(self.norm2_text(x_text)))
-                x_imag = x_imag + self.drop_path(self.gamma_2 * self.mlp_imag(self.norm2_imag(x_imag)))
+                x_imag = x[:, self.max_text_len:]
+                x_text = x_text + \
+                    self.drop_path(
+                        self.gamma_2 * self.mlp_text(self.norm2_text(x_text)))
+                x_imag = x_imag + \
+                    self.drop_path(
+                        self.gamma_2 * self.mlp_imag(self.norm2_imag(x_imag)))
                 x = torch.cat([x_text, x_imag], dim=1)
             else:
-                x = x + self.drop_path(self.gamma_2 * self.mlp_vl(self.norm2_vl(x)))
+                x = x + self.drop_path(self.gamma_2 *
+                                       self.mlp_vl(self.norm2_vl(x)))
 
         return x
 
@@ -215,8 +221,10 @@ class PatchEmbed(nn.Module):
         super().__init__()
         img_size = to_2tuple(img_size)
         patch_size = to_2tuple(patch_size)
-        num_patches = (img_size[1] // patch_size[1]) * (img_size[0] // patch_size[0])
-        self.patch_shape = (img_size[0] // patch_size[0], img_size[1] // patch_size[1])
+        num_patches = (img_size[1] // patch_size[1]) * \
+            (img_size[0] // patch_size[0])
+        self.patch_shape = (
+            img_size[0] // patch_size[0], img_size[1] // patch_size[1])
         self.img_size = img_size
         self.patch_size = patch_size
         self.num_patches = num_patches
@@ -311,9 +319,11 @@ class MultiWayTransformer(nn.Module):
         self.vlffn_start_layer_index = vlffn_start_layer_index
         if config["loss_names"]["textmlm"] > 0:
             self.vlffn_start_layer_index = depth
-            rank_zero_info("Set vlffn_start_layer_index={} for text-only pretraining".format(self.vlffn_start_layer_index))
+            rank_zero_info(
+                "Set vlffn_start_layer_index={} for text-only pretraining".format(self.vlffn_start_layer_index))
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, num_patches + 1, embed_dim)) if self.use_abs_pos_emb else None
+        self.pos_embed = nn.Parameter(torch.zeros(
+            1, num_patches + 1, embed_dim)) if self.use_abs_pos_emb else None
         self.pos_drop = nn.Dropout(p=drop_rate)
 
         dpr = [
@@ -365,7 +375,7 @@ class MultiWayTransformer(nn.Module):
 
         cls_tokens = self.cls_token.expand(B, -1, -1)
         x = torch.cat((cls_tokens, x), dim=1)
-        
+
         if self.pos_embed is not None:
             x = x + self.pos_embed
         x = self.pos_drop(x)
@@ -380,28 +390,32 @@ class MultiWayTransformer(nn.Module):
 def vlmo_base_patch16(pretrained=False, **kwargs):
     img_size = kwargs.pop("img_size", 224)
     model = MultiWayTransformer(
-        img_size=img_size, patch_size=16, embed_dim=768, depth=12, num_heads=12, 
-        mlp_ratio=4, qkv_bias=True, vlffn_start_layer_index=10, 
+        img_size=img_size, patch_size=16, embed_dim=768, depth=12, num_heads=12,
+        mlp_ratio=4, qkv_bias=True, vlffn_start_layer_index=10,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 # VLMo large/p16
+
+
 @register_model
 def vlmo_large_patch16(pretrained=False, **kwargs):
     img_size = kwargs.pop("img_size", 224)
     model = MultiWayTransformer(
-        img_size=img_size, patch_size=16, embed_dim=1024, depth=24, num_heads=16, 
-        mlp_ratio=4, qkv_bias=True, vlffn_start_layer_index=21, 
+        img_size=img_size, patch_size=16, embed_dim=1024, depth=24, num_heads=16,
+        mlp_ratio=4, qkv_bias=True, vlffn_start_layer_index=21,
         norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
 
 # VLMo base+/p16
+
+
 @register_model
 def vlmo_base_plus_patch16(pretrained=False, **kwargs):
     img_size = kwargs.pop("img_size", 224)
     model = MultiWayTransformer(
-        img_size=img_size, patch_size=16, embed_dim=544, depth=24, num_heads=16, 
+        img_size=img_size, patch_size=16, embed_dim=544, depth=24, num_heads=16,
         mlp_ratio=4, qkv_bias=True, vlffn_start_layer_index=21,
-        use_abs_pos_emb=True, need_relative_position_embed=False, 
+        use_abs_pos_emb=True, need_relative_position_embed=False,
         layer_scale_init_values=None, norm_layer=partial(nn.LayerNorm, eps=1e-6), **kwargs)
     return model
