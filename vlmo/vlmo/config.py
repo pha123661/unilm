@@ -5,13 +5,13 @@ ex = Experiment("VLMo")
 
 def _loss_names(d):
     ret = {
-        "itm": 0, # image-text matching loss
-        "itc": 0, # image-text contrastive loss
-        "mlm": 0, # masked language modeling loss
-        "textmlm": 0, # text-only masked language modeling
+        "itm": 0,  # image-text matching loss
+        "itc": 0,  # image-text contrastive loss
+        "mlm": 0,  # masked language modeling loss
+        "textmlm": 0,  # text-only masked language modeling
         "vqa": 0,
         "nlvr2": 0,
-        "irtr": 0, # retrieval task ft
+        "irtr": 0,  # retrieval task ft
     }
     ret.update(d)
     return ret
@@ -23,7 +23,8 @@ def config():
     seed = 1
     datasets = ["coco", "vg", "sbu", "gcc"]
     loss_names = _loss_names({"itm": 1, "itc": 1, "mlm": 1})
-    batch_size = 1024  # this is a desired batch size; pl trainer will accumulate gradients when per step batch is smaller.
+    # this is a desired batch size; pl trainer will accumulate gradients when per step batch is smaller.
+    batch_size = 1024
 
     # Image setting
     train_transform_keys = ["square_transform_randaug"]
@@ -70,6 +71,9 @@ def config():
     test_only = False
     use_sharded_training = False
     resume_during_training = False
+
+    # Delta-tuning Setting
+    delta = None
 
     # below params varies with the environment
     data_root = ""
@@ -171,7 +175,7 @@ def task_finetune_nlvr2_base():
     warmup_steps = 0.1
     learning_rate = 5e-5
     val_transform_keys = ["square_transform"]
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_patch16"
 
 
@@ -188,7 +192,7 @@ def task_finetune_nlvr2_base_plus():
     learning_rate = 3e-5
     drop_path_rate = 0.2
     val_transform_keys = ["square_transform"]
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_plus_patch16"
 
 
@@ -205,7 +209,7 @@ def task_finetune_nlvr2_base_image384():
     learning_rate = 5e-5
     val_transform_keys = ["square_transform"]
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_patch16"
 
 
@@ -223,7 +227,7 @@ def task_finetune_nlvr2_base_plus_image384():
     drop_path_rate = 0.2
     val_transform_keys = ["square_transform"]
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_plus_patch16"
 
 
@@ -240,7 +244,7 @@ def task_finetune_nlvr2_large():
     learning_rate = 3e-5
     drop_path_rate = 0.15
     val_transform_keys = ["square_transform"]
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_large_patch16"
 
 
@@ -258,7 +262,7 @@ def task_finetune_nlvr2_large_image384():
     drop_path_rate = 0.15
     val_transform_keys = ["square_transform"]
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_large_patch16"
 
 
@@ -280,7 +284,7 @@ def task_finetune_vqa_base_image480():
     val_transform_keys = ["square_transform"]
     lr_mult = 20
     image_size = 480
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_patch16"
 
 
@@ -299,7 +303,7 @@ def task_finetune_vqa_base_plus_image480():
     val_transform_keys = ["square_transform"]
     lr_mult = 20
     image_size = 480
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_plus_patch16"
 
 
@@ -318,7 +322,7 @@ def task_finetune_vqa_large_image480():
     val_transform_keys = ["square_transform"]
     lr_mult = 20
     image_size = 480
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_large_patch16"
 
 
@@ -339,8 +343,29 @@ def task_finetune_irtr_f30k_base():
     get_recall_metric = True
     learning_rate = 3e-5
     drop_path_rate = 0.15
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_patch16"
+
+
+@ex.named_config
+def task_bitfit_irtr_f30k_base_image384():
+    exp_name = "bitfit_irtr_f30k_base_image384"
+    datasets = ["f30k"]
+    train_transform_keys = ["square_transform_randaug"]
+    val_transform_keys = ["square_transform"]
+    loss_names = _loss_names({"irtr": 1.0})
+    batch_size = 3072
+    max_epoch = 50
+    max_steps = 1500
+    warmup_steps = 150
+    get_recall_metric = True
+    learning_rate = 3e-5
+    drop_path_rate = 0.15
+    image_size = 384
+    use_sharded_training = False
+    model_arch = "vlmo_base_patch16"
+
+    delta = 'bitfit'
 
 
 @ex.named_config
@@ -358,7 +383,7 @@ def task_finetune_irtr_f30k_base_image384():
     learning_rate = 3e-5
     drop_path_rate = 0.15
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_patch16"
 
 
@@ -377,7 +402,7 @@ def task_finetune_irtr_f30k_base_plus_image384():
     learning_rate = 3e-5
     drop_path_rate = 0.2
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_plus_patch16"
 
 
@@ -396,7 +421,7 @@ def task_finetune_irtr_f30k_large_image384():
     learning_rate = 2e-5
     drop_path_rate = 0.2
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_large_patch16"
 
 
@@ -418,7 +443,7 @@ def task_finetune_irtr_coco_base_image384():
     learning_rate = 3e-5
     drop_path_rate = 0.2
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_patch16"
 
 
@@ -437,7 +462,7 @@ def task_finetune_irtr_coco_base_plus_image384():
     learning_rate = 3e-5
     drop_path_rate = 0.2
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_base_plus_patch16"
 
 
@@ -456,7 +481,7 @@ def task_finetune_irtr_coco_large_image384():
     learning_rate = 2e-5
     drop_path_rate = 0.2
     image_size = 384
-    use_sharded_training=False
+    use_sharded_training = False
     model_arch = "vlmo_large_patch16"
 
 

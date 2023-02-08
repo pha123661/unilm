@@ -1,13 +1,13 @@
-import os
 import copy
+import os
+
 import pytorch_lightning as pl
-
-from vlmo.config import ex
-from vlmo.modules import VLMo
-from vlmo.datamodules.multitask_datamodule import MTDataModule
-
 from pytorch_lightning.plugins import environments as pl_env
 from pytorch_lightning.utilities.distributed import rank_zero_info
+
+from vlmo.config import ex
+from vlmo.datamodules.multitask_datamodule import MTDataModule
+from vlmo.modules import VLMo
 
 
 class OMPIClusterEnvironment(pl_env.ClusterEnvironment):
@@ -108,10 +108,11 @@ def main(_config):
     resume_ckpt = None
     if _config["resume_during_training"]:
         for index in range(100):
-            ckpt_path = os.path.join(_config["log_dir"], f'{exp_name}_seed{_config["seed"]}_from_{_config["load_path"].split("/")[-1][:-5]}', "version_{}/checkpoints/last.ckpt".format(index))
+            ckpt_path = os.path.join(
+                _config["log_dir"], f'{exp_name}_seed{_config["seed"]}_from_{_config["load_path"].split("/")[-1][:-5]}', "version_{}/checkpoints/last.ckpt".format(index))
             if os.path.exists(ckpt_path):
                 resume_ckpt = ckpt_path
-    
+
     rank_zero_info("resume_ckpt: {}".format(resume_ckpt))
 
     cluster_plugin = get_cluster_plugin(
@@ -161,6 +162,21 @@ def main(_config):
 
         for name, param in model.named_parameters():
             rank_zero_info("{}\t{}".format(name, param.requires_grad))
+
+        # Delta tuning
+    # if _config['delta'] is not None:
+    #     # from bigmodelvis import Visualization
+    #     # Visualization(model).structure_graph()
+    #     rank_zero_info("#" * 20)
+    #     rank_zero_info(f"Enabling delta-tuning {_config['delta']}")
+    #     rank_zero_info("#" * 20)
+    #     if _config['delta'] == 'bitfit':
+    #         for name, param in model.named_parameters():
+    #             if name[-len('bias'):] != "bias":
+    #                 param.requires_grad = False
+    #     else:
+    #         raise Exception(
+    #             f'no matching delta-tuning implementation for {_config["delta"]}')
 
     if not _config["test_only"]:
         trainer.fit(model, datamodule=dm)
