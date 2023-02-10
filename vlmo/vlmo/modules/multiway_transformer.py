@@ -221,6 +221,16 @@ class Block(nn.Module):
                 attn_drop=attn_drop,
                 proj_drop=drop,
             )
+        elif delta_config['type'] == 'bitfit':
+            pass  # handled in run.py
+            self.attn = Attention(
+                dim,
+                num_heads=num_heads,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                attn_drop=attn_drop,
+                proj_drop=drop,
+            )
         elif delta_config['type'] == 'prefix':
             self.attn = PrefixAttention(
                 dim,
