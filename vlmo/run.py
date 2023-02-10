@@ -173,8 +173,10 @@ def main(_config):
                     param.requires_grad = False
         elif _config['delta']['type'] == 'prefix':
             for name, param in model.named_parameters():
-                if 'prompts' not in name:
+                if 'prompt' not in name:
                     param.requires_grad = False
+                else:
+                    rank_zero_info(f"{name} is trainable")
         else:
             raise Exception(
                 f'no matching delta-tuning implementation for {_config["delta"]}')

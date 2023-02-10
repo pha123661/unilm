@@ -76,6 +76,7 @@ def config():
     delta = {
         'type': None,
         'prefix_length': None,
+        'reparameterization': None,
     }
 
     # below params varies with the environment
@@ -406,11 +407,11 @@ def task_prefix_irtr_f30k_base_image384():
     val_transform_keys = ["square_transform"]
     loss_names = _loss_names({"irtr": 1.0})
     batch_size = 3072
-    max_epoch = 50
+    max_epoch = 100
     max_steps = 1500
     warmup_steps = 150
     get_recall_metric = True
-    learning_rate = 3e-5
+    learning_rate = 1e-5
     drop_path_rate = 0.15
     image_size = 384
     use_sharded_training = False
@@ -418,7 +419,8 @@ def task_prefix_irtr_f30k_base_image384():
 
     delta = {
         'type': 'prefix',
-        'prefix_length': 100,
+        'prefix_length': 128,
+        'reparameterization': True,
     }
 
 

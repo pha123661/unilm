@@ -124,10 +124,21 @@ class PrefixAttention(Attention):
         super().__init__(dim, **kwargs)
         self.prefix_length = delta_config['prefix_length']
         self.dim = dim
-        # x2 since we directly insert tokens to K and V
-        self.prompts = nn.Embedding(self.prefix_length, self.dim * 2)
+        self.reparameterization = delta_config['reparameterization']
         self.prefix_indices = torch.arange(
             self.prefix_length, dtype=torch.long)
+
+        # x2 since we directly insert tokens to K and V
+        if self.reparameterization:
+            # follows P-tuning v2:https://github.com/THUDM/P-tuning-v2/blob/main/model/prefix_encoder.py
+            self.prompts = nn.Embedding(self.prefix_length, self.dim)
+            self.prompt_project = torch.nn.Sequential(
+                torch.nn.Linear(dim, dim),
+                torch.nn.Tanh(),
+                torch.nn.Linear(dim, dim * 2),
+            )
+        else:
+            self.prompts = nn.Embedding(self.prefix_length, self.dim * 2)
 
     def get_prompts(self, batch_size):
         '''
@@ -137,6 +148,8 @@ class PrefixAttention(Attention):
         indices = self.prefix_indices.unsqueeze(
             0).expand(batch_size, -1).to(self.qkv.weight.device)
         prompts = self.prompts(indices)
+        if self.reparameterization:
+            prompts = self.prompt_project(prompts)
         key_prompts, val_prompts = torch.split(prompts, self.dim, dim=-1)
         key_prompts = key_prompts.reshape(batch_size, self.num_heads,
                                           self.prefix_length, -1)
@@ -185,7 +198,6 @@ class PrefixAttention(Attention):
             attn = attn.masked_fill(~mask[:, None, None, :], float("-inf"))
         attn = attn.softmax(dim=-1).type_as(x)
         attn = self.attn_drop(attn)
-
         x = (attn @ v).transpose(1, 2).reshape(B, N, C)
         x = self.proj(x)
         x = self.proj_drop(x)
