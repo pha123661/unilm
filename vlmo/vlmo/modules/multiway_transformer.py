@@ -82,8 +82,7 @@ class Attention(nn.Module):
         self.proj_drop = nn.Dropout(proj_drop)
 
     def forward(self, x, mask=None, relative_position_bias=None):
-        B, N, C = x.shape
-
+        B, N, C = x.shape  # B, N, 768 for base
         qkv_bias = None
         if self.q_bias is not None:
             qkv_bias = torch.cat((self.q_bias, torch.zeros_like(
@@ -92,9 +91,9 @@ class Attention(nn.Module):
         qkv = qkv.reshape(B, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
 
         q, k, v = (
-            qkv[0],
-            qkv[1],
-            qkv[2],
+            qkv[0],  # B, n_head, N, 768//n_head
+            qkv[1],  # ditto
+            qkv[2],  # ditto
         )  # make torchscript happy (cannot use tensor as tuple)
 
         q = q * self.scale
@@ -105,6 +104,84 @@ class Attention(nn.Module):
 
         if mask is not None:
             mask = mask.bool()
+            attn = attn.masked_fill(~mask[:, None, None, :], float("-inf"))
+        attn = attn.softmax(dim=-1).type_as(x)
+        attn = self.attn_drop(attn)
+
+        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
+        x = self.proj(x)
+        x = self.proj_drop(x)
+        return x
+
+
+class PrefixAttention(Attention):
+    def __init__(
+        self,
+        dim,
+        delta_config,  # NEW!
+        **kwargs
+    ):
+        super().__init__(dim, **kwargs)
+        self.prefix_length = delta_config['prefix_length']
+        self.dim = dim
+        # x2 since we directly insert tokens to K and V
+        self.prompts = nn.Embedding(self.prefix_length, self.dim * 2)
+        self.prefix_indices = torch.arange(
+            self.prefix_length, dtype=torch.long)
+
+    def get_prompts(self, batch_size):
+        '''
+        Input: batch(int)
+        Output: Tensor(B, N_head, N_token, N_dim//N_head) * 2
+        '''
+        indices = self.prefix_indices.unsqueeze(
+            0).expand(batch_size, -1).to(self.qkv.weight.device)
+        prompts = self.prompts(indices)
+        key_prompts, val_prompts = torch.split(prompts, self.dim, dim=-1)
+        key_prompts = key_prompts.reshape(batch_size, self.num_heads,
+                                          self.prefix_length, -1)
+        val_prompts = val_prompts.reshape(batch_size, self.num_heads,
+                                          self.prefix_length, -1)
+        return key_prompts, val_prompts
+
+    def forward(self, x, mask=None, relative_position_bias=None):
+        B, N, C = x.shape  # B, N, 768 for base
+        qkv_bias = None
+        if self.q_bias is not None:
+            qkv_bias = torch.cat((self.q_bias, torch.zeros_like(
+                self.v_bias, requires_grad=False), self.v_bias))
+        qkv = F.linear(input=x, weight=self.qkv.weight,
+                       bias=qkv_bias)  # B, N, 786*3
+        qkv = qkv.reshape(B, N, 3, self.num_heads, -1).permute(2, 0, 3, 1, 4)
+
+        q, k, v = (
+            qkv[0],  # B, n_head, N, 768//n_head
+            qkv[1],  # ditto
+            qkv[2],  # ditto
+        )  # make torchscript happy (cannot use tensor as tuple)
+
+        # *Append prompt tokens
+        key_prompts, val_prompts = self.get_prompts(B)
+        k = torch.cat([key_prompts, k], dim=2)  # third dim is seq_len
+        v = torch.cat([val_prompts, v], dim=2)
+
+        q = q * self.scale
+        attn = (q.float() @ k.float().transpose(-2, -1))
+
+        if relative_position_bias is not None:
+            # *Append zero in front of position encoding
+            # attn.shape = (B, n_head, seq_len, prefix_len + seq_len); rpb.shape = (n_head, seq_len, seq_len)
+            padding_shape = list(relative_position_bias.shape)
+            padding_shape[-1] = self.prefix_length
+            relative_position_bias = torch.cat(
+                [torch.zeros(*padding_shape, device=relative_position_bias.device), relative_position_bias], dim=-1)
+            attn = attn + relative_position_bias.unsqueeze(0)
+
+        if mask is not None:
+            # *Append True in front of mask
+            mask = torch.cat(
+                [torch.ones(B, self.prefix_length, device=mask.device), mask], dim=-1)
+            mask = mask.bool()  # mask.shape = B, seq_len; mask True = allow attention
             attn = attn.masked_fill(~mask[:, None, None, :], float("-inf"))
         attn = attn.softmax(dim=-1).type_as(x)
         attn = self.attn_drop(attn)
@@ -131,17 +208,32 @@ class Block(nn.Module):
         with_vlffn=False,
         layer_scale_init_values=0.1,
         max_text_len=40,
+        delta_config=None,
     ):
         super().__init__()
         self.norm1 = norm_layer(dim)
-        self.attn = Attention(
-            dim,
-            num_heads=num_heads,
-            qkv_bias=qkv_bias,
-            qk_scale=qk_scale,
-            attn_drop=attn_drop,
-            proj_drop=drop,
-        )
+        if delta_config is None or delta_config['type'] is None:
+            self.attn = Attention(
+                dim,
+                num_heads=num_heads,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                attn_drop=attn_drop,
+                proj_drop=drop,
+            )
+        elif delta_config['type'] == 'prefix':
+            self.attn = PrefixAttention(
+                dim,
+                delta_config,
+                num_heads=num_heads,
+                qkv_bias=qkv_bias,
+                qk_scale=qk_scale,
+                attn_drop=attn_drop,
+                proj_drop=drop,
+            )
+        else:
+            raise Exception(f'wrong delta config: {delta_config}')
+
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(
             drop_path) if drop_path > 0.0 else nn.Identity()
@@ -181,7 +273,7 @@ class Block(nn.Module):
 
     def forward(self, x, mask=None, modality_type=None, relative_position_bias=None):
         x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x),
-                               mask=mask, relative_position_bias=relative_position_bias))
+                                                        mask=mask, relative_position_bias=relative_position_bias))
 
         if modality_type == "image":
             x = x + self.drop_path(self.gamma_2 *
@@ -297,6 +389,7 @@ class MultiWayTransformer(nn.Module):
             config: (dict): other hyper from pytorch-lighting
         """
         super().__init__()
+        self.delta_config = config['delta']
         drop_path_rate = drop_path_rate if config is None else config["drop_path_rate"]
         rank_zero_info("drop path rate: {}".format(drop_path_rate))
         self.use_abs_pos_emb = use_abs_pos_emb
@@ -344,6 +437,7 @@ class MultiWayTransformer(nn.Module):
                     with_vlffn=(i >= self.vlffn_start_layer_index),
                     layer_scale_init_values=layer_scale_init_values,
                     max_text_len=config["max_text_len"],
+                    delta_config=self.delta_config,
                 )
                 for i in range(depth)
             ]
@@ -364,7 +458,7 @@ class MultiWayTransformer(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
-    @torch.jit.ignore
+    @ torch.jit.ignore
     def no_weight_decay(self):
         return {"pos_embed", "cls_token"}
 
@@ -386,7 +480,7 @@ class MultiWayTransformer(nn.Module):
 
 
 # VLMo base/p16
-@register_model
+@ register_model
 def vlmo_base_patch16(pretrained=False, **kwargs):
     img_size = kwargs.pop("img_size", 224)
     model = MultiWayTransformer(
@@ -398,7 +492,7 @@ def vlmo_base_patch16(pretrained=False, **kwargs):
 # VLMo large/p16
 
 
-@register_model
+@ register_model
 def vlmo_large_patch16(pretrained=False, **kwargs):
     img_size = kwargs.pop("img_size", 224)
     model = MultiWayTransformer(
@@ -410,7 +504,7 @@ def vlmo_large_patch16(pretrained=False, **kwargs):
 # VLMo base+/p16
 
 
-@register_model
+@ register_model
 def vlmo_base_plus_patch16(pretrained=False, **kwargs):
     img_size = kwargs.pop("img_size", 224)
     model = MultiWayTransformer(

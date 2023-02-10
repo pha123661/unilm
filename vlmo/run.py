@@ -165,11 +165,15 @@ def main(_config):
 
     # Delta tuning
     if _config['delta'] is not None:
-        # from bigmodelvis import Visualization
-        # Visualization(model).structure_graph()
-        if _config['delta'] == 'bitfit':
+        from bigmodelvis import Visualization
+        Visualization(model).structure_graph()
+        if _config['delta']['type'] == 'bitfit':
             for name, param in model.named_parameters():
                 if name[-len('bias'):] != "bias":
+                    param.requires_grad = False
+        elif _config['delta']['type'] == 'prefix':
+            for name, param in model.named_parameters():
+                if 'prompts' not in name:
                     param.requires_grad = False
         else:
             raise Exception(

@@ -73,7 +73,10 @@ def config():
     resume_during_training = False
 
     # Delta-tuning Setting
-    delta = None
+    delta = {
+        'type': None,
+        'prefix_length': None,
+    }
 
     # below params varies with the environment
     data_root = ""
@@ -349,6 +352,7 @@ def task_finetune_irtr_f30k_base():
 
 @ex.named_config
 def task_bitfit_irtr_f30k_base_image384():
+    # Has 177K trainables
     exp_name = "bitfit_irtr_f30k_base_image384"
     datasets = ["f30k"]
     train_transform_keys = ["square_transform_randaug"]
@@ -365,7 +369,34 @@ def task_bitfit_irtr_f30k_base_image384():
     use_sharded_training = False
     model_arch = "vlmo_base_patch16"
 
-    delta = 'bitfit'
+    delta = {
+        'type': 'bitfit',
+    }
+
+
+@ex.named_config
+def task_prefix_irtr_f30k_base_image384():
+    # Has 1.8M trainables
+    exp_name = "prefix_irtr_f30k_base_image384"
+    datasets = ["f30k"]
+    train_transform_keys = ["square_transform_randaug"]
+    val_transform_keys = ["square_transform"]
+    loss_names = _loss_names({"irtr": 1.0})
+    batch_size = 3072
+    max_epoch = 50
+    max_steps = 1500
+    warmup_steps = 150
+    get_recall_metric = True
+    learning_rate = 3e-5
+    drop_path_rate = 0.15
+    image_size = 384
+    use_sharded_training = False
+    model_arch = "vlmo_base_patch16"
+
+    delta = {
+        'type': 'prefix',
+        'prefix_length': 100,
+    }
 
 
 @ex.named_config
