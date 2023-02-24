@@ -341,6 +341,31 @@ def task_prefix_vqa_base_image480():
 
 
 @ex.named_config
+def task_moe_prefix_vqa_base_image480():
+    exp_name = "moe_prefix_vqa_base_image480"
+    datasets = ["vqa"]
+    train_transform_keys = ["square_transform_randaug"]
+    loss_names = _loss_names({"vqa": 1})
+    batch_size = 128
+    max_epoch = 10
+    max_steps = None
+    warmup_steps = 0.1
+    learning_rate = 1e-4
+    drop_path_rate = 0.15
+    val_transform_keys = ["square_transform"]
+    lr_mult = 20
+    image_size = 480
+    use_sharded_training = False
+    model_arch = "vlmo_base_patch16"
+
+    delta = {
+        'type': 'moe_prefix',
+        'prefix_length': 64,
+        'reparameterization': False,
+    }
+
+
+@ex.named_config
 def task_finetune_vqa_base_plus_image480():
     exp_name = "finetune_vqa_base_plus_image480"
     datasets = ["vqa"]

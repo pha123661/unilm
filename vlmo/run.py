@@ -170,15 +170,17 @@ def main(_config):
         if _config['delta']['type'] == 'bitfit':
             # bitfit
             for name, param in model.named_parameters():
-                if name[-len('bias'):] != "bias":
+                if name[-len('bias'):] == "bias" or 'classifier' in name:
+                    rank_zero_info(f"{name} is trainable")
+                else:
                     param.requires_grad = False
         elif _config['delta']['type'] in {'prefix', 'moe_prefix'}:
             # prefix tuning
             for name, param in model.named_parameters():
-                if 'prompt' not in name:
-                    param.requires_grad = False
-                else:
+                if 'prompt' in name or 'classifier' in name:
                     rank_zero_info(f"{name} is trainable")
+                else:
+                    param.requires_grad = False
         else:
             raise Exception(
                 f'no matching delta-tuning implementation for {_config["delta"]}')
