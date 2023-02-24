@@ -168,10 +168,12 @@ def main(_config):
         from bigmodelvis import Visualization
         Visualization(model).structure_graph()
         if _config['delta']['type'] == 'bitfit':
+            # bitfit
             for name, param in model.named_parameters():
                 if name[-len('bias'):] != "bias":
                     param.requires_grad = False
-        elif _config['delta']['type'] == 'prefix':
+        elif _config['delta']['type'] in {'prefix', 'moe_prefix'}:
+            # prefix tuning
             for name, param in model.named_parameters():
                 if 'prompt' not in name:
                     param.requires_grad = False

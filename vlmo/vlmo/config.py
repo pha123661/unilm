@@ -450,6 +450,32 @@ def task_prefix_irtr_f30k_base_image384():
 
 
 @ex.named_config
+def task_moe_prefix_irtr_f30k_base_image384():
+    # Has 1.8M trainables
+    exp_name = "moe_prefix_irtr_f30k_base_image384"
+    datasets = ["f30k"]
+    train_transform_keys = ["square_transform_randaug"]
+    val_transform_keys = ["square_transform"]
+    loss_names = _loss_names({"irtr": 1.0})
+    batch_size = 3072
+    max_epoch = 100
+    max_steps = 1500
+    warmup_steps = 150
+    get_recall_metric = True
+    learning_rate = 1e-5
+    drop_path_rate = 0.15
+    image_size = 384
+    use_sharded_training = False
+    model_arch = "vlmo_base_patch16"
+
+    delta = {
+        'type': 'moe_prefix',
+        'prefix_length': 128,
+        'reparameterization': False,
+    }
+
+
+@ex.named_config
 def task_finetune_irtr_f30k_base_image384():
     exp_name = "finetune_irtr_f30k_base_image384"
     datasets = ["f30k"]
