@@ -119,15 +119,21 @@ class MoEPrefixAttention(Attention):
         self,
         dim,
         delta_config,  # NEW!
+        with_vl,
         **kwargs
     ):
         super().__init__(dim, **kwargs)
         self.prefix_length = delta_config['prefix_length']
         self.dim = dim
         self.reparameterization = delta_config['reparameterization']
-        self.modality_types = {'text', 'image', 'vl'}
-        self.prefix_indices = {k: torch.arange(
-            self.prefix_length, dtype=torch.long) for k in self.modality_types}
+
+        if with_vl:
+            self.modality_types = {'text', 'image', 'vl'}
+        else:
+            self.modality_types = {'text', 'image'}
+
+        self.prefix_indices = torch.arange(
+            self.prefix_length, dtype=torch.long)
 
         # x2 since we directly insert tokens to K and V
         if self.reparameterization:
@@ -144,22 +150,44 @@ class MoEPrefixAttention(Attention):
             self.prompts = nn.ModuleDict({k: nn.Embedding(
                 self.prefix_length, self.dim * 2) for k in self.modality_types})
 
+    def get_prefix_length(self, modality_type):
+        if modality_type in self.modality_types:
+            return self.prefix_length
+        else:
+            return self.prefix_length * 2
+
     def get_prompts(self, batch_size, modality_type):
         '''
         Input: batch(int)
         Output: Tensor(B, N_head, N_token, N_dim//N_head) * 2
         '''
-        assert modality_type in self.modality_types
-        indices = self.prefix_indices[modality_type].unsqueeze(
-            0).expand(batch_size, -1).to(self.qkv.weight.device)
-        prompts = self.prompts[modality_type](indices)
-        if self.reparameterization:
-            prompts = self.prompt_project(prompts)
-        key_prompts, val_prompts = torch.split(prompts, self.dim, dim=-1)
-        key_prompts = key_prompts.reshape(batch_size, self.num_heads,
-                                          self.prefix_length, -1)
-        val_prompts = val_prompts.reshape(batch_size, self.num_heads,
-                                          self.prefix_length, -1)
+        assert modality_type in {'text', 'image', 'vl'}
+
+        if modality_type in self.modality_types:
+            indices = self.prefix_indices.unsqueeze(
+                0).expand(batch_size, -1).to(self.qkv.weight.device)
+            prompts = self.prompts[modality_type](indices)
+            if self.reparameterization:
+                prompts = self.prompt_project(prompts)
+            key_prompts, val_prompts = torch.split(prompts, self.dim, dim=-1)
+            key_prompts = key_prompts.reshape(batch_size, self.num_heads,
+                                              self.get_prefix_length(modality_type), self.dim // self.num_heads)
+            val_prompts = val_prompts.reshape(batch_size, self.num_heads,
+                                              self.get_prefix_length(modality_type), self.dim // self.num_heads)
+        elif modality_type == 'vl':
+            # concat image and text prompt for vl fusion
+            indices = self.prefix_indices.unsqueeze(
+                0).expand(batch_size, -1).to(self.qkv.weight.device)
+            prompts = torch.cat([self.prompts['text'](indices),
+                                 self.prompts['image'](indices)], dim=1)  # dim = (B, N, hidden)
+
+            if self.reparameterization:
+                prompts = self.prompt_project(prompts)
+            key_prompts, val_prompts = torch.split(prompts, self.dim, dim=-1)
+            key_prompts = key_prompts.reshape(batch_size, self.num_heads,
+                                              self.get_prefix_length(modality_type), -1)
+            val_prompts = val_prompts.reshape(batch_size, self.num_heads,
+                                              self.get_prefix_length(modality_type), - 1)
         return key_prompts, val_prompts
 
     def forward(self, x, mask=None, relative_position_bias=None, modality_type=None):
@@ -191,7 +219,7 @@ class MoEPrefixAttention(Attention):
             # *Append zero in front of position encoding
             # attn.shape = (B, n_head, seq_len, prefix_len + seq_len); rpb.shape = (n_head, seq_len, seq_len)
             padding_shape = list(relative_position_bias.shape)
-            padding_shape[-1] = self.prefix_length
+            padding_shape[-1] = self.get_prefix_length(modality_type)
             relative_position_bias = torch.cat(
                 [torch.zeros(*padding_shape, device=relative_position_bias.device), relative_position_bias], dim=-1)
             attn = attn + relative_position_bias.unsqueeze(0)
@@ -199,7 +227,7 @@ class MoEPrefixAttention(Attention):
         if mask is not None:
             # *Append True in front of mask
             mask = torch.cat(
-                [torch.ones(B, self.prefix_length, device=mask.device), mask], dim=-1)
+                [torch.ones(B, self.get_prefix_length(modality_type), device=mask.device), mask], dim=-1)
             mask = mask.bool()  # mask.shape = B, seq_len; mask True = allow attention
             attn = attn.masked_fill(~mask[:, None, None, :], float("-inf"))
         attn = attn.softmax(dim=-1).type_as(x)
@@ -358,6 +386,7 @@ class Block(nn.Module):
                 qk_scale=qk_scale,
                 attn_drop=attn_drop,
                 proj_drop=drop,
+                with_vl=with_vlffn,
             )
         else:
             raise Exception(f'wrong delta config: {delta_config}')
