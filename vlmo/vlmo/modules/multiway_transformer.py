@@ -139,7 +139,7 @@ class MoEPrefixAttention(Attention):
 
         # x2 since we directly insert tokens to K and V
         if self.reparameterization:
-            # follows P-tuning v2:https://github.com/THUDM/P-tuning-v2/blob/main/model/prefix_encoder.py
+            # *follows P-tuning v2 implementation:https://github.com/THUDM/P-tuning-v2/blob/main/model/prefix_encoder.py
             self.prompts = nn.ModuleDict({k: nn.Embedding(
                 self.prefix_length, self.dim) for k in self.modality_types})
             # share the reparameterization projection among all modalities
@@ -160,7 +160,11 @@ class MoEPrefixAttention(Attention):
         assert modality_type in {'text', 'image', 'vl'}
 
         def split_kv(prompts):
-            key_prompts, val_prompts = torch.split(prompts, self.dim, dim=-1)
+            '''
+            Splits prompt of shape (B, N, hidden * 2) to key and value prompts
+            '''
+            key_prompts, val_prompts = prompts[...,
+                                               :self.dim], prompts[..., self.dim:]
             key_prompts = key_prompts.reshape(
                 batch_size, self.num_heads, self.prefix_length, self.dim // self.num_heads)
             val_prompts = val_prompts.reshape(
@@ -168,9 +172,12 @@ class MoEPrefixAttention(Attention):
             return key_prompts, val_prompts
 
         if modality_type in self.modality_types:
-            indices = self.prefix_indices.unsqueeze(
-                0).expand(batch_size, -1).to(self.qkv.weight.device)
+            indices = self.prefix_indices\
+                .unsqueeze(0)\
+                .expand(batch_size, -1)\
+                .to(self.qkv.weight.device)
             prompts = self.prompts[modality_type](indices)
+
             if self.reparameterization:
                 prompts = self.prompt_project(prompts)
 
@@ -241,20 +248,21 @@ class MoEPrefixAttention(Attention):
         elif modality_type == 'vl':
             # *Append both text and image prompts
             # seq = [text_prompt, text, image_prompt, image]
-            (t_p_key, t_p_val), (i_p_key, i_p_val) = self.get_prompts(B, modality_type)
+            (text_prompt_key, text_prompt_val), (image_prompt_key,
+                                                 image_prompt_val) = self.get_prompts(B, modality_type)
             # B, n_head, N, 768//n_head
-            (t_key, i_key) = torch.split(
+            (text_key, image_key) = torch.split(
                 k, [self.max_text_len, k.shape[2] - self.max_text_len], dim=2)
-            (t_val, i_val) = torch.split(
+            (text_val, image_val) = torch.split(
                 v, [self.max_text_len, v.shape[2] - self.max_text_len], dim=2)
-            k = torch.cat([t_p_key,
-                           t_key,
-                           i_p_key,
-                           i_key], dim=2)
-            v = torch.cat([t_p_val,
-                           t_val,
-                           i_p_val,
-                           i_val], dim=2)
+            k = torch.cat([text_prompt_key,
+                           text_key,
+                           image_prompt_key,
+                           image_key], dim=2)
+            v = torch.cat([text_prompt_val,
+                           text_val,
+                           image_prompt_val,
+                           image_val], dim=2)
 
             q = q * self.scale
             attn = (q.float() @ k.float().transpose(-2, -1))
@@ -264,12 +272,10 @@ class MoEPrefixAttention(Attention):
                 # attn.shape = (B, n_head, seq_len, prefix_len + seq_len); rpb.shape = (n_head, seq_len, seq_len)
                 t_rpb, i_rpb = relative_position_bias[...,
                                                       :self.max_text_len], relative_position_bias[..., self.max_text_len:]
-                padding_shape = list(relative_position_bias.shape)
-                padding_shape[-1] = self.prefix_length
-                padding = torch.zeros(
-                    *padding_shape, device=relative_position_bias.device)
+                zero_padding = torch.zeros(
+                    self.num_heads, attn.shape[2], self.prefix_length, device=relative_position_bias.device)
                 relative_position_bias = torch.cat(
-                    [padding, t_rpb, padding, i_rpb], dim=2)
+                    [zero_padding, t_rpb, zero_padding, i_rpb], dim=2)
                 attn = attn + relative_position_bias.unsqueeze(0)
 
             if mask is not None:
@@ -278,9 +284,9 @@ class MoEPrefixAttention(Attention):
                 mask = mask.bool()
                 t_mask, i_mask = mask[:,
                                       :self.max_text_len], mask[:, self.max_text_len:]
-                padding = torch.ones(B, self.prefix_length,
-                                     dtype=torch.bool, device=mask.device)
-                mask = torch.cat([padding, t_mask, padding, i_mask], dim=1)
+                true_mask = torch.ones(B, self.prefix_length,
+                                       dtype=torch.bool, device=mask.device)
+                mask = torch.cat([true_mask, t_mask, true_mask, i_mask], dim=1)
                 attn = attn.masked_fill(~mask[:, None, None, :], float("-inf"))
 
             attn = attn.softmax(dim=-1).type_as(x)
