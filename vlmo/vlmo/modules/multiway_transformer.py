@@ -439,6 +439,7 @@ class Block(nn.Module):
                 attn_drop=attn_drop,
                 proj_drop=drop,
             )
+            self.prefix_length = delta_config['prefix_length']
         elif delta_config['type'] == 'moe_prefix':
             self.attn = MoEPrefixAttention(
                 dim,
@@ -451,6 +452,7 @@ class Block(nn.Module):
                 with_vl=with_vlffn,
                 max_text_len=max_text_len,
             )
+            self.prefix_length = delta_config['prefix_length']
         else:
             raise Exception(f'wrong delta config: {delta_config}')
 
@@ -493,13 +495,8 @@ class Block(nn.Module):
 
     def forward(self, x, mask=None, modality_type=None, relative_position_bias=None):
         if isinstance(self.attn, MoEPrefixAttention):
-            x = x + self.drop_path(
-                self.gamma_1 *
-                self.attn(
-                    self.norm1(x),
-                    mask=mask, relative_position_bias=relative_position_bias, modality_type=modality_type,
-                )
-            )
+            x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x), mask=mask,
+                                   relative_position_bias=relative_position_bias, modality_type=modality_type,))
 
         else:
             x = x + self.drop_path(self.gamma_1 * self.attn(self.norm1(x),
@@ -513,8 +510,16 @@ class Block(nn.Module):
                                    self.mlp_text(self.norm2_text(x)))
         else:
             if self.mlp_vl is None:
-                x_text = x[:, : self.max_text_len]
-                x_imag = x[:, self.max_text_len:]
+                if isinstance(self.attn, MoEPrefixAttention):
+                    x_text = x[:, :self.prefix_length + self.max_text_len]
+                    x_imag = x[:, self.prefix_length + self.max_text_len:]
+                elif isinstance(self.attn, PrefixAttention):
+                    x_text = x[:, :self.prefix_length + self.max_text_len]
+                    x_imag = x[:, self.prefix_length + self.max_text_len:]
+                else:
+                    x_text = x[:, :self.max_text_len]
+                    x_imag = x[:, self.max_text_len:]
+
                 x_text = x_text + \
                     self.drop_path(
                         self.gamma_2 * self.mlp_text(self.norm2_text(x_text)))
