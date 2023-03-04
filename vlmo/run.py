@@ -164,7 +164,7 @@ def main(_config):
             rank_zero_info("{}\t{}".format(name, param.requires_grad))
 
     # Delta tuning
-    if _config['delta'] is not None:
+    if _config['delta'] is not None and _config['delta']['type'] is not None:
         from bigmodelvis import Visualization
         Visualization(model).structure_graph()
         if _config['delta']['type'] == 'bitfit':
