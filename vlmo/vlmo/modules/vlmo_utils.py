@@ -1,16 +1,16 @@
-import torch
-import random
 import json
+import random
 
-from transformers.optimization import AdamW
-from transformers import (
-    get_polynomial_decay_schedule_with_warmup,
-    get_cosine_schedule_with_warmup,
-)
-from vlmo.modules.dist_utils import all_gather
-from vlmo.modules.objectives import compute_irtr_recall, compute_irtr_recall_with_rerank
-from vlmo.gadgets.my_metrics import Accuracy, VQAScore, Scalar
+import torch
 from pytorch_lightning.utilities.distributed import rank_zero_info
+from transformers import (get_cosine_schedule_with_warmup,
+                          get_polynomial_decay_schedule_with_warmup)
+from transformers.optimization import AdamW
+
+from vlmo.gadgets.my_metrics import Accuracy, Scalar, VQAScore
+from vlmo.modules.dist_utils import all_gather
+from vlmo.modules.objectives import (compute_irtr_recall,
+                                     compute_irtr_recall_with_rerank)
 
 
 def set_metrics(pl_module):
@@ -57,20 +57,25 @@ def epoch_wrapup(pl_module):
     the_metric = 0
 
     if pl_module.hparams.config["get_recall_metric"] and not pl_module.training:
-        (val_ir_r1, val_ir_r5, val_ir_r10, val_tr_r1, val_tr_r5, val_tr_r10) = compute_irtr_recall(pl_module, split="val")
-        val_avg = (val_ir_r1.item() + val_ir_r5.item() + val_ir_r10.item() + val_tr_r1.item() + val_tr_r5.item() + val_tr_r10.item()) / 6.0
+        (val_ir_r1, val_ir_r5, val_ir_r10, val_tr_r1, val_tr_r5,
+         val_tr_r10) = compute_irtr_recall(pl_module, split="val")
+        val_avg = (val_ir_r1.item() + val_ir_r5.item() + val_ir_r10.item() +
+                   val_tr_r1.item() + val_tr_r5.item() + val_tr_r10.item()) / 6.0
         pl_module.logger.experiment.add_scalar(
             "recalls/val_avg", val_avg, pl_module.global_step
         )
 
-        (ir_r1, ir_r5, ir_r10, tr_r1, tr_r5, tr_r10) = compute_irtr_recall(pl_module, split="test")
-        test_avg = (ir_r1.item() + ir_r5.item() + ir_r10.item() + tr_r1.item() + tr_r5.item() + tr_r10.item()) / 6.0
+        (ir_r1, ir_r5, ir_r10, tr_r1, tr_r5,
+         tr_r10) = compute_irtr_recall(pl_module, split="test")
+        test_avg = (ir_r1.item() + ir_r5.item() + ir_r10.item() +
+                    tr_r1.item() + tr_r5.item() + tr_r10.item()) / 6.0
         pl_module.logger.experiment.add_scalar(
             "recalls/test_avg", test_avg, pl_module.global_step
         )
 
         print("val_avg:{}, test_avg:{}".format(val_avg, test_avg))
-        print("test ir_r1:{}, ir_r5:{}, ir_r10:{}, tr_r1:{}, tr_r5:{}, tr_r10:{}".format(ir_r1, ir_r5, ir_r10, tr_r1, tr_r5, tr_r10))
+        print("test ir_r1:{}, ir_r5:{}, ir_r10:{}, tr_r1:{}, tr_r5:{}, tr_r10:{}".format(
+            ir_r1, ir_r5, ir_r10, tr_r1, tr_r5, tr_r10))
         pl_module.logger.experiment.add_scalar(
             "recalls/ir_r1", ir_r1, pl_module.global_step
         )
@@ -91,7 +96,6 @@ def epoch_wrapup(pl_module):
         )
         the_metric += val_avg
 
-
     for loss_name, v in pl_module.hparams.config["loss_names"].items():
         if v < 1:
             continue
@@ -109,7 +113,8 @@ def epoch_wrapup(pl_module):
             getattr(pl_module, f"{phase}_{loss_name}_loss").reset()
         elif loss_name == "nlvr2":
             if phase == "train":
-                value = getattr(pl_module, f"train_{loss_name}_accuracy").compute()
+                value = getattr(
+                    pl_module, f"train_{loss_name}_accuracy").compute()
                 pl_module.log(f"{loss_name}/train/accuracy_epoch", value)
                 getattr(pl_module, f"train_{loss_name}_accuracy").reset()
                 pl_module.log(
@@ -118,7 +123,8 @@ def epoch_wrapup(pl_module):
                 )
                 getattr(pl_module, f"train_{loss_name}_loss").reset()
             else:
-                value_dev = getattr(pl_module, f"dev_{loss_name}_accuracy").compute()
+                value_dev = getattr(
+                    pl_module, f"dev_{loss_name}_accuracy").compute()
                 pl_module.log(f"{loss_name}/dev/accuracy_epoch", value_dev)
                 getattr(pl_module, f"dev_{loss_name}_accuracy").reset()
                 pl_module.log(
@@ -127,7 +133,8 @@ def epoch_wrapup(pl_module):
                 )
                 getattr(pl_module, f"dev_{loss_name}_loss").reset()
 
-                value_test = getattr(pl_module, f"test_{loss_name}_accuracy").compute()
+                value_test = getattr(
+                    pl_module, f"test_{loss_name}_accuracy").compute()
                 pl_module.log(f"{loss_name}/test/accuracy_epoch", value_test)
                 getattr(pl_module, f"test_{loss_name}_accuracy").reset()
                 pl_module.log(
@@ -137,23 +144,26 @@ def epoch_wrapup(pl_module):
                 getattr(pl_module, f"test_{loss_name}_loss").reset()
                 value = value_dev
         elif loss_name == "irtr":
-            value_i2t = getattr(pl_module, f"{phase}_{loss_name}_i2t_accuracy").compute()
+            value_i2t = getattr(
+                pl_module, f"{phase}_{loss_name}_i2t_accuracy").compute()
             pl_module.log(f"{loss_name}/{phase}/i2t_accuracy_epoch", value_i2t)
             getattr(pl_module, f"{phase}_{loss_name}_i2t_accuracy").reset()
-            
-            value_t2i = getattr(pl_module, f"{phase}_{loss_name}_t2i_accuracy").compute()
+
+            value_t2i = getattr(
+                pl_module, f"{phase}_{loss_name}_t2i_accuracy").compute()
             pl_module.log(f"{loss_name}/{phase}/t2i_accuracy_epoch", value_t2i)
             getattr(pl_module, f"{phase}_{loss_name}_t2i_accuracy").reset()
 
             value = value_i2t + value_t2i
-            
+
             pl_module.log(
                 f"{loss_name}/{phase}/loss_epoch",
                 getattr(pl_module, f"{phase}_{loss_name}_loss").compute(),
             )
             getattr(pl_module, f"{phase}_{loss_name}_loss").reset()
         elif loss_name == "itm":
-            value = getattr(pl_module, f"{phase}_{loss_name}_accuracy").compute()
+            value = getattr(
+                pl_module, f"{phase}_{loss_name}_accuracy").compute()
             pl_module.log(f"{loss_name}/{phase}/accuracy_epoch", value)
             getattr(pl_module, f"{phase}_{loss_name}_accuracy").reset()
             pl_module.log(
@@ -162,31 +172,38 @@ def epoch_wrapup(pl_module):
             )
             getattr(pl_module, f"{phase}_{loss_name}_loss").reset()
         elif loss_name == "itc":
-            value_i2t = getattr(pl_module, f"{phase}_{loss_name}_i2t_accuracy").compute()
+            value_i2t = getattr(
+                pl_module, f"{phase}_{loss_name}_i2t_accuracy").compute()
             pl_module.log(f"{loss_name}/{phase}/i2t_accuracy_epoch", value_i2t)
             getattr(pl_module, f"{phase}_{loss_name}_i2t_accuracy").reset()
-            
-            value_t2i = getattr(pl_module, f"{phase}_{loss_name}_t2i_accuracy").compute()
+
+            value_t2i = getattr(
+                pl_module, f"{phase}_{loss_name}_t2i_accuracy").compute()
             pl_module.log(f"{loss_name}/{phase}/t2i_accuracy_epoch", value_t2i)
             getattr(pl_module, f"{phase}_{loss_name}_t2i_accuracy").reset()
-            
+
             pl_module.log(
                 f"{loss_name}/{phase}/loss_epoch",
                 getattr(pl_module, f"{phase}_{loss_name}_loss").compute(),
             )
             getattr(pl_module, f"{phase}_{loss_name}_loss").reset()
 
-            value_vl_i2t = getattr(pl_module, f"{phase}_{loss_name}_vl_i2t_accuracy").compute()
-            pl_module.log(f"{loss_name}/{phase}/vl_i2t_accuracy_epoch", value_vl_i2t)
+            value_vl_i2t = getattr(
+                pl_module, f"{phase}_{loss_name}_vl_i2t_accuracy").compute()
+            pl_module.log(
+                f"{loss_name}/{phase}/vl_i2t_accuracy_epoch", value_vl_i2t)
             getattr(pl_module, f"{phase}_{loss_name}_vl_i2t_accuracy").reset()
-            
-            value_vl_t2i = getattr(pl_module, f"{phase}_{loss_name}_vl_t2i_accuracy").compute()
-            pl_module.log(f"{loss_name}/{phase}/vl_t2i_accuracy_epoch", value_vl_t2i)
+
+            value_vl_t2i = getattr(
+                pl_module, f"{phase}_{loss_name}_vl_t2i_accuracy").compute()
+            pl_module.log(
+                f"{loss_name}/{phase}/vl_t2i_accuracy_epoch", value_vl_t2i)
             getattr(pl_module, f"{phase}_{loss_name}_vl_t2i_accuracy").reset()
 
             value = value_i2t + value_t2i
         else:
-            value = getattr(pl_module, f"{phase}_{loss_name}_accuracy").compute()
+            value = getattr(
+                pl_module, f"{phase}_{loss_name}_accuracy").compute()
             pl_module.log(f"{loss_name}/{phase}/accuracy_epoch", value)
             getattr(pl_module, f"{phase}_{loss_name}_accuracy").reset()
             pl_module.log(
@@ -242,8 +259,8 @@ def set_schedule(pl_module):
             "params": [
                 p
                 for n, p in pl_module.named_parameters()
-                if not any(nd in n for nd in no_decay)
-                and not any(bb in n for bb in head_names)
+                if not any(nd in n for nd in no_decay) and
+                not any(bb in n for bb in head_names)
             ],
             "weight_decay": wd,
             "lr": lr,
@@ -252,8 +269,8 @@ def set_schedule(pl_module):
             "params": [
                 p
                 for n, p in pl_module.named_parameters()
-                if any(nd in n for nd in no_decay)
-                and not any(bb in n for bb in head_names)
+                if any(nd in n for nd in no_decay) and
+                not any(bb in n for bb in head_names)
             ],
             "weight_decay": 0.0,
             "lr": lr,
@@ -262,8 +279,8 @@ def set_schedule(pl_module):
             "params": [
                 p
                 for n, p in pl_module.named_parameters()
-                if not any(nd in n for nd in no_decay)
-                and any(bb in n for bb in head_names)
+                if not any(nd in n for nd in no_decay) and
+                any(bb in n for bb in head_names)
             ],
             "weight_decay": wd,
             "lr": lr * lr_mult,
@@ -286,13 +303,25 @@ def set_schedule(pl_module):
     elif optim_type == "adam":
         optimizer = torch.optim.Adam(optimizer_grouped_parameters, lr=lr)
     elif optim_type == "sgd":
-        optimizer = torch.optim.SGD(optimizer_grouped_parameters, lr=lr, momentum=0.9)
+        optimizer = torch.optim.SGD(
+            optimizer_grouped_parameters, lr=lr, )
+    elif optim_type == 'lion':
+        try:
+            from lion_pytorch import Lion
+        except ImportError:
+            print(
+                "Lion not installed, please check: https://github.com/lucidrains/lion-pytorch")
+        optimizer = Lion(optimizer_grouped_parameters,
+                         lr=lr / 5, betas=(0.9, 0.98), use_triton=True)
+        import warnings
+        warnings.warn(
+            "Optimizer LR has beed divided by 5 as suggested by LION")
 
-    if pl_module.trainer.max_steps is None or pl_module.trainer.max_steps==-1:
+    if pl_module.trainer.max_steps is None or pl_module.trainer.max_steps == -1:
         max_steps = (
-            len(pl_module.trainer.datamodule.train_dataloader())
-            * pl_module.trainer.max_epochs
-            // pl_module.trainer.accumulate_grad_batches
+            len(pl_module.trainer.datamodule.train_dataloader()) *
+            pl_module.trainer.max_epochs //
+            pl_module.trainer.accumulate_grad_batches
         )
     else:
         max_steps = pl_module.trainer.max_steps
@@ -300,7 +329,8 @@ def set_schedule(pl_module):
     warmup_steps = pl_module.hparams.config["warmup_steps"]
     if isinstance(pl_module.hparams.config["warmup_steps"], float):
         warmup_steps = int(max_steps * warmup_steps)
-    rank_zero_info("Warmup_steps:{} \t Max_steps:{}".format(warmup_steps, max_steps))
+    rank_zero_info("Warmup_steps:{} \t Max_steps:{}".format(
+        warmup_steps, max_steps))
 
     if decay_power == "cosine":
         scheduler = get_cosine_schedule_with_warmup(
