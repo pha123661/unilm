@@ -304,7 +304,7 @@ def set_schedule(pl_module):
         optimizer = torch.optim.Adam(optimizer_grouped_parameters, lr=lr)
     elif optim_type == "sgd":
         optimizer = torch.optim.SGD(
-            optimizer_grouped_parameters, lr=lr, )
+            optimizer_grouped_parameters, lr=lr, momentum=0.9)
     elif optim_type == 'lion':
         try:
             from lion_pytorch import Lion
