@@ -311,7 +311,7 @@ def set_schedule(pl_module):
         except ImportError:
             print(
                 "Lion not installed, please check: https://github.com/lucidrains/lion-pytorch")
-        lion_scale = 5  # 3 <= lion_scale <= 10 compared to AdamW
+        lion_scale = 10  # 3 <= lion_scale <= 10 compared to AdamW
         for param_dict in optimizer_grouped_parameters:
             if 'weight_decay' in param_dict:
                 param_dict['weight_decay'] *= lion_scale
@@ -319,7 +319,7 @@ def set_schedule(pl_module):
                 param_dict['lr'] /= lion_scale
 
         optimizer = Lion(optimizer_grouped_parameters,
-                         lr=lr / lion_scale, betas=(0.9, 0.98), use_triton=True)
+                         lr=lr / lion_scale, use_triton=True)
         import warnings
         warnings.warn(
             f"Optimizer lr /= {lion_scale}, weight decay *= {lion_scale} as suggested by LION")
