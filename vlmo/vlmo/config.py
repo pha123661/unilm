@@ -25,6 +25,7 @@ def config():
     loss_names = _loss_names({"itm": 1, "itc": 1, "mlm": 1})
     # this is a desired batch size; pl trainer will accumulate gradients when per step batch is smaller.
     batch_size = 1024
+    n_shot = -1
 
     # Image setting
     train_transform_keys = ["square_transform_randaug"]

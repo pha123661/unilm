@@ -1,8 +1,10 @@
+import random
+
 from .base_dataset import BaseDataset
 
 
 class VQAv2Dataset(BaseDataset):
-    def __init__(self, *args, split="", **kwargs):
+    def __init__(self, *args, split="", n_shot=-1, **kwargs):
         assert split in ["train", "val", "test"]
         self.split = split
 
@@ -20,6 +22,11 @@ class VQAv2Dataset(BaseDataset):
             text_column_name="questions",
             remove_duplicate=False,
         )
+
+        if split == "train" and n_shot > 0:
+            new_index_mapper = random.sample(
+                list(self.index_mapper.values()), k=n_shot)
+            self.index_mapper = {i: v for i, v in enumerate(new_index_mapper)}
 
     def __getitem__(self, index):
         image_tensor = self.get_image(index)["image"]

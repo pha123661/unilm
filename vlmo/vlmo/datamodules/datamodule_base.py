@@ -1,12 +1,8 @@
 import torch
-
 from pytorch_lightning import LightningDataModule
 from torch.utils.data import DataLoader
-from transformers import (
-    DataCollatorForLanguageModeling,
-    DataCollatorForWholeWordMask,
-    BertTokenizer,
-)
+from transformers import (BertTokenizer, DataCollatorForLanguageModeling,
+                          DataCollatorForWholeWordMask)
 
 
 def get_pretrained_tokenizer(from_pretrained):
@@ -30,6 +26,7 @@ class BaseDataModule(LightningDataModule):
         self.num_workers = _config["num_workers"]
         self.batch_size = _config["per_gpu_batchsize"]
         self.eval_batch_size = self.batch_size
+        self.n_shot = _config["n_shot"]
 
         self.image_size = _config["image_size"]
         self.max_text_len = _config["max_text_len"]
@@ -74,16 +71,32 @@ class BaseDataModule(LightningDataModule):
         raise NotImplementedError("return name of dataset")
 
     def set_train_dataset(self):
-        self.train_dataset = self.dataset_cls(
-            self.data_dir,
-            self.train_transform_keys,
-            split="train",
-            image_size=self.image_size,
-            max_text_len=self.max_text_len,
-            draw_false_image=self.draw_false_image,
-            draw_false_text=self.draw_false_text,
-            image_only=self.image_only,
-        )
+        if 'n_shot' in self.dataset_cls.__init__.__code__.co_varnames:
+            self.train_dataset = self.dataset_cls(
+                self.data_dir,
+                self.train_transform_keys,
+                split="train",
+                n_shot=self.n_shot,  # NEW
+                image_size=self.image_size,
+                max_text_len=self.max_text_len,
+                draw_false_image=self.draw_false_image,
+                draw_false_text=self.draw_false_text,
+                image_only=self.image_only,
+            )
+        else:
+            if self.n_shot != -1:
+                raise NotImplementedError(
+                    "`n_shot` specified but not implemented by the dataset")
+            self.train_dataset = self.dataset_cls(
+                self.data_dir,
+                self.train_transform_keys,
+                split="train",
+                image_size=self.image_size,
+                max_text_len=self.max_text_len,
+                draw_false_image=self.draw_false_image,
+                draw_false_text=self.draw_false_text,
+                image_only=self.image_only,
+            )
 
     def set_val_dataset(self):
         self.val_dataset = self.dataset_cls(
